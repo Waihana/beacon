@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="dark">
+<title>Waihana — us or them?</title>
+<!--
+  The Beacon — a single static page that answers one question: is waihana.com down,
+  and is it us or a provider?
+
+  No build step, no dependencies, no CDN, no webfont, no server, no database, no secrets,
+  no auth. It fetches when you open it, so it is current by construction.
+
+  Source of truth lives in the Waihana Reef repository; this is a published copy.
+-->
+<style>
+  :root {
+    --bg: #0b1016; --panel: #121a23; --line: #1f2b36;
+    --ink: #e8eef4; --dim: #8fa3b5; --faint: #5d7488;
+    --ok: #3ddc97; --warn: #ffb547; --bad: #ff4f33;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: max(env(safe-area-inset-top), 20px) 18px max(env(safe-area-inset-bottom), 28px);
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 34rem; margin: 0 auto; }
+  .eyebrow { font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: var(--faint); margin: 0 0 14px; }
+  /* The verdict is the page. Everything else is evidence for it. */
+  .verdict { font-size: clamp(26px, 8vw, 38px); line-height: 1.12; font-weight: 650; letter-spacing: -.02em; margin: 0; }
+  .because { color: var(--dim); margin: 10px 0 0; font-size: 15px; }
+  .bar { height: 3px; border-radius: 2px; margin: 20px 0 24px; background: var(--line); }
+  .bar.ok { background: var(--ok); } .bar.warn { background: var(--warn); } .bar.bad { background: var(--bad); }
+
+  .row { display: flex; align-items: center; gap: 12px; padding: 13px 0; border-bottom: 1px solid var(--line); }
+  .row:last-child { border-bottom: 0; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); flex: 0 0 auto; }
+  .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); }
+  .dot.bad { background: var(--bad); } .dot.unknown { background: var(--faint); }
+  .name { flex: 1 1 auto; font-weight: 500; }
+  .name small { display: block; font-weight: 400; color: var(--faint); font-size: 12.5px; margin-top: 1px; }
+  .state { color: var(--dim); font-size: 13.5px; text-align: right; }
+  .state.bad { color: var(--bad); } .state.warn { color: var(--warn); }
+
+  h2 { font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: var(--faint);
+       margin: 30px 0 2px; font-weight: 600; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 4px 14px; }
+  footer { margin-top: 26px; color: var(--faint); font-size: 12.5px; display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+  button {
+    font: inherit; font-size: 13px; color: var(--ink); background: transparent;
+    border: 1px solid var(--line); border-radius: 999px; padding: 7px 16px; cursor: pointer;
+  }
+  button:active { background: var(--line); }
+  @media (prefers-reduced-motion: no-preference) { .spin { animation: s 1s linear infinite; } }
+  @keyframes s { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="eyebrow">Waihana · Beacon</p>
+  <h1 class="verdict" id="verdict">Checking…</h1>
+  <p class="because" id="because">Asking Waihana and every provider it depends on.</p>
+  <div class="bar" id="bar"></div>
+
+  <h2>Waihana</h2>
+  <div class="panel"><div id="self"></div></div>
+
+  <h2>Providers</h2>
+  <div class="panel"><div id="vendors"></div></div>
+
+  <footer>
+    <span id="stamp">—</span>
+    <button id="again" type="button">Check again</button>
+  </footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* Each of these sends `Access-Control-Allow-Origin: *`, which is what makes a server
+     unnecessary. status.anthropic.com 301s to status.claude.com, so the final URL is used. */
+  var VENDORS = [
+    { name: "Supabase",   note: "database, auth, storage", url: "https://status.supabase.com/api/v2/status.json" },
+    { name: "Cloudflare", note: "DNS and edge",            url: "https://www.cloudflarestatus.com/api/v2/status.json" },
+    { name: "Shopify",    note: "orders and checkout",     url: "https://www.shopifystatus.com/api/v2/status.json" },
+    { name: "Twilio",     note: "calls and texts",         url: "https://status.twilio.com/api/v2/status.json" },
+    { name: "Claude",     note: "the assistant",           url: "https://status.claude.com/api/v2/status.json" },
+    { name: "ChatGPT",    note: "the assistant",           url: "https://status.openai.com/api/v2/status.json" },
+    { name: "LiveKit",    note: "huddles and voice",       url: "https://status.livekit.io/api/v2/status.json" },
+    { name: "Deepgram",   note: "transcription",           url: "https://status.deepgram.com/api/v2/status.json" }
+  ];
+
+  /* No browser-readable status page. Listed so their absence is stated rather than silent. */
+  var UNREADABLE = [
+    { name: "Railway", note: "hosts Reef — covered by the Waihana check above" },
+    { name: "Postmark", note: "email sending — publishes no readable status" }
+  ];
+
+  var HEALTH = "https://staff.waihana.com/api/health";
+  var RANK = { none: 0, minor: 1, major: 2, critical: 3 };
+  var el = function (id) { return document.getElementById(id); };
+
+  function withTimeout(ms) {
+    var c = new AbortController();
+    setTimeout(function () { c.abort(); }, ms);
+    return c.signal;
+  }
+
+  function row(name, note, cls, state) {
+    var d = document.createElement("div");
+    d.className = "row";
+    d.innerHTML =
+      '<span class="dot ' + cls + '"></span>' +
+      '<span class="name"></span>' +
+      '<span class="state ' + (cls === "bad" ? "bad" : cls === "warn" ? "warn" : "") + '"></span>';
+    var n = d.querySelector(".name");
+    n.textContent = name;
+    if (note) { var s = document.createElement("small"); s.textContent = note; n.appendChild(s); }
+    d.querySelector(".state").textContent = state;
+    return d;
+  }
+
+  /* Measured from THIS browser — the vantage point that matters. */
+  function checkSelf() {
+    return fetch(HEALTH + "?t=" + Date.now(), { cache: "no-store", signal: withTimeout(9000) })
+      .then(function (r) { return { up: r.ok, code: r.status }; })
+      .catch(function () { return { up: false, code: 0 }; });
+  }
+
+  function checkVendor(v) {
+    return fetch(v.url, { cache: "no-store", signal: withTimeout(9000) })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        var s = (j && j.status) || {};
+        return { v: v, indicator: s.indicator || "none", desc: s.description || "Operational" };
+      })
+      /* ⚠️ A failed read is NOT an outage. Saying "Supabase is down" because a status page would
+         not load is the cry-wolf failure this page exists to avoid. */
+      .catch(function () { return { v: v, indicator: "unknown", desc: "Can’t reach status page" }; });
+  }
+
+  function classOf(ind) {
+    if (ind === "none") return "ok";
+    if (ind === "minor") return "warn";
+    if (ind === "major" || ind === "critical") return "bad";
+    return "unknown";
+  }
+
+  function render(self, results) {
+    var selfBox = el("self");
+    selfBox.textContent = "";
+    selfBox.appendChild(
+      self.up
+        ? row("waihana.com", "answering normally", "ok", "Up")
+        : row("waihana.com", self.code ? "responded " + self.code : "no response", "bad", "Not answering")
+    );
+
+    var box = el("vendors");
+    box.textContent = "";
+    results
+      .slice()
+      .sort(function (a, b) { return (RANK[b.indicator] || 0) - (RANK[a.indicator] || 0); })
+      .forEach(function (r) {
+        box.appendChild(row(r.v.name, r.v.note, classOf(r.indicator), r.desc));
+      });
+    UNREADABLE.forEach(function (u) { box.appendChild(row(u.name, u.note, "unknown", "No public feed")); });
+
+    /* The "probably us" branch matters most: a provider's status page can report all-clear while
+       our own deploy is the cause. */
+    var hurting = results.filter(function (r) { return r.indicator === "major" || r.indicator === "critical"; });
+    var minor = results.filter(function (r) { return r.indicator === "minor"; });
+    var unreadable = results.filter(function (r) { return r.indicator === "unknown"; });
+    var v = el("verdict"), b = el("because"), bar = el("bar");
+
+    if (!self.up && hurting.length) {
+      v.textContent = "Probably them.";
+      b.textContent = "Waihana isn’t answering, and " + hurting.map(function (r) { return r.v.name; }).join(" and ") +
+        (hurting.length > 1 ? " are" : " is") + " reporting a major incident. Sit tight.";
+      bar.className = "bar bad";
+    } else if (!self.up) {
+      v.textContent = "Probably us.";
+      b.textContent = "Waihana isn’t answering and every provider reports normal service. Check whether a deploy is rolling out — that is the usual cause, and it clears on its own in a few minutes.";
+      bar.className = "bar bad";
+    } else if (hurting.length) {
+      v.textContent = "Waihana is up.";
+      b.textContent = hurting.map(function (r) { return r.v.name; }).join(" and ") +
+        (hurting.length > 1 ? " are" : " is") + " having a major incident, so anything that depends on " +
+        (hurting.length > 1 ? "them" : "it") + " may fail. Everything else is fine.";
+      bar.className = "bar warn";
+    } else if (minor.length) {
+      v.textContent = "Waihana is up.";
+      b.textContent = minor.map(function (r) { return r.v.name; }).join(", ") + " report minor issues. Nothing to do.";
+      bar.className = "bar ok";
+    } else {
+      v.textContent = "All good.";
+      b.textContent = unreadable.length
+        ? "Waihana is answering and every provider reports normal service. " + unreadable.length + " status page" +
+          (unreadable.length > 1 ? "s were" : " was") + " unreadable, which is not the same as an outage."
+        : "Waihana is answering and every provider reports normal service.";
+      bar.className = "bar ok";
+    }
+
+    el("stamp").textContent = "Checked " + new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
+  }
+
+  var busy = false;
+  function run() {
+    if (busy) return;
+    busy = true;
+    var btn = el("again");
+    btn.disabled = true;
+    btn.textContent = "Checking…";
+    Promise.all([checkSelf(), Promise.all(VENDORS.map(checkVendor))])
+      .then(function (out) { render(out[0], out[1]); })
+      .catch(function () {
+        el("verdict").textContent = "Can’t tell.";
+        el("because").textContent = "This device couldn’t reach anything at all — which usually means the problem is your own connection, not Waihana.";
+        el("bar").className = "bar warn";
+      })
+      .then(function () {
+        busy = false;
+        btn.disabled = false;
+        btn.textContent = "Check again";
+      });
+  }
+
+  el("again").addEventListener("click", run);
+  /* Re-check when the phone comes back to the page — the common case is unlocking it to look. */
+  document.addEventListener("visibilitychange", function () { if (!document.hidden) run(); });
+  setInterval(function () { if (!document.hidden) run(); }, 60000);
+  run();
+})();
+</script>
+</body>
+</html>
