@@ -138,6 +138,8 @@
   .kv { display: flex; gap: 10px; font-size: 12.5px; padding: 3px 0; }
   .kv dt { flex: 0 0 5.6rem; color: var(--faint); margin: 0; }
   .kv dd { margin: 0; color: var(--dim); }
+  .elsewhere { color: var(--faint); font-size: 12px; margin: 12px 0 4px; padding-top: 9px; border-top: 1px dashed var(--line); }
+  .elsewhere + .inc, .elsewhere ~ .inc { opacity: .72; }
   .expand a { color: var(--dim); font-size: 12.5px; }
   .expand a:hover { color: var(--ink); }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); flex: 0 0 auto; }
@@ -288,9 +290,12 @@
    */
   var VENDORS = [
     { name: "Supabase",   note: "database, auth, storage",  affects: "Signing in, and everything saved",     home: "https://status.supabase.com",      url: "https://status.supabase.com/api/v2/summary.json" },
-    { name: "Cloudflare", note: "DNS and edge",             affects: "Reaching the site at all",             home: "https://www.cloudflarestatus.com", url: "https://www.cloudflarestatus.com/api/v2/summary.json" },
+    { name: "Cloudflare", note: "DNS and edge",             affects: "Reaching the site at all",             home: "https://www.cloudflarestatus.com", url: "https://www.cloudflarestatus.com/api/v2/summary.json",
+      uses: ["Authoritative DNS", "DNS Updates", "CDN/Cache", "Network", "SSL Certificate Provisioning"] },
     { name: "Shopify",    note: "orders and checkout",      affects: "Orders, products and the storefront",  home: "https://www.shopifystatus.com",    url: "https://www.shopifystatus.com/api/v2/summary.json" },
-    { name: "Twilio",     note: "calls and texts",          affects: "Phone calls and text messages",        home: "https://status.twilio.com",        url: "https://status.twilio.com/api/v2/summary.json" },
+    { name: "Twilio",     note: "calls and texts",          affects: "Phone calls and text messages",        home: "https://status.twilio.com",        url: "https://status.twilio.com/api/v2/summary.json",
+      uses: ["SMS", "Programmable Messaging API", "SMS Long Code, North America", "Voice, North America",
+             "PSTN US1", "TwiML US1", "Voice REST API US1"] },
     { name: "Claude",     note: "the assistant",            affects: "The assistant and its replies",        home: "https://status.claude.com",        url: "https://status.claude.com/api/v2/summary.json" },
     { name: "ChatGPT",    note: "the assistant",            affects: "Some assistant features",              home: "https://status.openai.com",        url: "https://status.openai.com/api/v2/summary.json" },
     { name: "LiveKit",    note: "huddles and voice",        affects: "Huddles and live voice",               home: "https://status.livekit.io",        url: "https://status.livekit.io/api/v2/summary.json" },
@@ -438,23 +443,75 @@
                 since: i.begin || null,
                 impact: "major"
               };
-            })
+            }),
+            other: []
           };
         }
         var st = (j && j.status) || {};
-        /* ⛔ INCIDENTS, NOT COMPONENTS. Cloudflare alone lists ~80 non-operational components at any
-           moment — individual city PoPs under maintenance. Showing those would bury the one line
-           that matters under a list nobody can read, which is how a status page gets ignored. */
-        var inc = (j && j.incidents ? j.incidents : []).slice(0, 2).map(function (i) {
+        var all = (j && j.incidents ? j.incidents : []).map(function (i) {
           var u = (i.incident_updates || [])[0] || {};
           return {
             name: i.name || "Incident",
             body: (u.body || "").replace(/\s+/g, " ").trim(),
             since: i.started_at || null,
-            impact: i.impact || "none"
+            impact: i.impact || "none",
+            parts: (i.components || []).map(function (c) { return c.name; })
           };
         });
-        return { v: v, indicator: st.indicator || "none", desc: st.description || "Operational", incidents: inc };
+
+        /**
+         * ⛔ THE GLOBAL INDICATOR IS NOT OUR ANSWER, AND TRUSTING IT WAS CRYING WOLF DAILY.
+         *
+         * Owner, 2026-11-12: *"the cloudflare degradation reads like we are having issues but we
+         * dont use input uploads or models or replication...do we?"* We do not. Measured that
+         * day: Cloudflare was "Partially Degraded Service" because **Replicate, Workers and
+         * Queues** were degraded — none of which Reef touches, and we hold no Cloudflare API
+         * credential at all. Twilio was amber for **SMS delays to Kazakhstan and Sierra Leone**.
+         * Both amber rows on the page were noise: a 100% false-positive rate.
+         *
+         * And it is not a one-off. Cloudflare publishes **483 components, 353 of them city PoPs**,
+         * of which **77 were non-operational at that moment** — so its global indicator is amber
+         * essentially always. A row that is amber always is a row you learn to skip, and then you
+         * skip it on the day it matters. That is precisely the failure this page exists to stop.
+         *
+         * So a vendor may declare `uses`: the components Reef actually depends on. The row's state
+         * is the worst of THOSE, and incidents are split into ones that touch them and ones that
+         * do not. ⚠️ Nothing is hidden — the rest still appear in the row's detail under "not
+         * affecting us", because suppressing a vendor's own words would be its own kind of lying.
+         *
+         * ⛔ AND IF THE NAMES DRIFT, SAY SO RATHER THAN GO GREEN. A vendor renaming a component
+         * would match nothing, and "nothing matched" must never read as "nothing wrong" — that is
+         * a detector blind to the thing reporting absence confidently. Zero matches falls back to
+         * the global indicator and flags it in the detail.
+         */
+        var COMP_IND = { operational: "none", degraded_performance: "minor",
+                         partial_outage: "major", major_outage: "critical", under_maintenance: "minor" };
+        if (v.uses && v.uses.length) {
+          var mine = (j && j.components ? j.components : []).filter(function (c) {
+            return v.uses.indexOf(c.name) >= 0;
+          });
+          if (!mine.length) {
+            return { v: v, indicator: st.indicator || "none",
+                     desc: (st.description || "Operational"),
+                     drift: true, incidents: all.slice(0, 2), other: [] };
+          }
+          var worst = "none";
+          mine.forEach(function (c) {
+            var i2 = COMP_IND[c.status] || "none";
+            if ((RANK[i2] || 0) > (RANK[worst] || 0)) worst = i2;
+          });
+          var ours = all.filter(function (i) {
+            return i.parts.some(function (n) { return v.uses.indexOf(n) >= 0; });
+          });
+          var notOurs = all.filter(function (i) { return ours.indexOf(i) < 0; });
+          return {
+            v: v, indicator: worst,
+            desc: worst === "none" ? "Operational for what we use" : (st.description || "Degraded"),
+            scoped: mine.length, incidents: ours.slice(0, 3), other: notOurs.slice(0, 4)
+          };
+        }
+        return { v: v, indicator: st.indicator || "none", desc: st.description || "Operational",
+                 incidents: all.slice(0, 2), other: [] };
       })
       /* ⚠️ A failed read is NOT an outage. Saying "Supabase is down" because a status page would
          not load is the cry-wolf failure this page exists to avoid. */
@@ -529,8 +586,23 @@
         var det = document.createDocumentFragment();
         det.appendChild(kv("Affects", r.v.affects || r.v.note));
         det.appendChild(kv("Status", r.desc));
-        det.appendChild(kv("How we know", "Their own public status feed"));
+        det.appendChild(kv("How we know", r.scoped
+          ? "Their status feed, read for the " + r.scoped + " parts Reef uses"
+          : "Their own public status feed"));
+        if (r.scoped) det.appendChild(kv("Parts we use", r.v.uses.join(", ")));
+        /* ⛔ Drift must be loud. Matching nothing can never read as nothing-wrong. */
+        if (r.drift) det.appendChild(kv("Heads up", "Their component names changed, so this falls back to their overall status. The scope list needs updating."));
         det.appendChild(incidentNodes(r.incidents));
+
+        /* ⚠️ Their other incidents are still shown — demoted, never suppressed. The row should not
+           go amber for them, but hiding a vendor's own words would be its own kind of lying. */
+        if (r.other && r.other.length) {
+          var h = document.createElement("p");
+          h.className = "elsewhere";
+          h.textContent = "Elsewhere at " + r.v.name + " — not affecting what we use:";
+          det.appendChild(h);
+          det.appendChild(incidentNodes(r.other));
+        }
         if (r.v.home) det.appendChild(link(r.v.home, r.v.home.replace(/^https:\/\//, "")));
 
         var cls = classOf(r.indicator);
