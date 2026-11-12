@@ -7,8 +7,36 @@
 <meta name="color-scheme" content="dark">
 <title>Waihana — us or them?</title>
 <!--
-  The Beacon — is waihana.com down, and is it us or a provider?
-  One static page. No build, no dependencies, no server, no database, no secrets, no auth.
+  THE BEACON — the one page that still answers when Reef does not.
+
+  ── WHY IT EXISTS ──────────────────────────────────────────────────────────────────────────────
+  Reef 502'd during a deploy on 2026-11-11 and the owner found out because he happened to be
+  looking at the site. His next sentence was the whole product: "whether it was us or them". And
+  what he'd have done with the answer: "nothing — i'd just know not to panic and keep working."
+
+  ⛔ IT LIVES OUTSIDE EVERYTHING IT WATCHES. `next start` is the only web server in the Reef repo,
+  so a status page hosted inside Reef is unreachable in exactly the moment it is wanted. This file
+  is served as a static asset from GitHub Pages — not Railway, not Supabase, not Cloudflare, none
+  of which it is allowed to depend on, because every one of them is a candidate cause.
+
+  ⛔ NO BUILD STEP, NO DEPENDENCIES, NO CDN, NO WEBFONT. Every byte is in this file. A beacon that
+  needs a CDN to render is a beacon that goes dark with the CDN. System fonts only.
+
+  ⛔ NO SERVER, NO CRON, NO DATABASE, NO SECRETS, NO AUTH. It fetches when you open it, so it is
+  current by construction — there is no stale cache and no scheduler to be late. (GitHub Actions
+  schedules drift 15-30 minutes under load, which is useless for "tell me now".) It holds nothing
+  worth protecting: public vendor status, plus whether waihana.com answers. That is precisely what
+  makes it safe to put outside every system it monitors.
+
+  ── WHAT IT CAN AND CANNOT KNOW ────────────────────────────────────────────────────────────────
+  ⚠️ Railway has NO cross-origin status API — `/api/v1/summary` returns the SPA's HTML. That turns
+  out not to matter: Railway HOSTS Reef, so "is my app on Railway reachable" is a more useful
+  question than "is Railway globally healthy", and this page measures that directly by asking
+  waihana.com itself. Postmark publishes no browser-readable status either; it is listed as
+  unreadable rather than quietly omitted.
+
+  ⚠️ IT MEASURES FROM WHERE YOU ARE STANDING. If your own connection is the problem, every row goes
+  red — which is itself the answer, and the page says so rather than blaming Waihana.
 -->
 <style>
   :root {
@@ -42,7 +70,10 @@
   .state { color: var(--dim); font-size: 13.5px; text-align: right; }
   .state.bad { color: var(--bad); } .state.warn { color: var(--warn); }
 
-  .detail { padding: 0 0 13px 21px; border-bottom: 1px solid var(--line); margin-top: -4px; }
+  /* ⚠️ The incident title sits directly under the rule that separates it from its provider
+     row, so it needs real breathing room above it — a negative margin here had it almost
+     touching the line (owner, 2026-11-12). */
+  .detail { padding: 11px 0 13px 21px; border-bottom: 1px solid var(--line); }
   .inc { margin: 0 0 9px; }
   .inc:last-child { margin-bottom: 0; }
   .inc b { display: block; font-weight: 600; font-size: 13.5px; color: var(--ink); }
@@ -74,6 +105,11 @@
   <h2>Providers</h2>
   <div class="panel"><div id="vendors"></div></div>
 
+  <p class="because" id="probenote" style="margin-top:14px;font-size:12.5px;color:var(--faint)">
+    Providers below the line publish no status page, so Reef asks their API host directly.
+    “Answering” means the host responded — not that the service is healthy.
+  </p>
+
   <footer>
     <span id="stamp">—</span>
     <button id="again" type="button">Check again</button>
@@ -87,7 +123,9 @@
   /* ⚠️ VERIFIED 2026-11-12: every one of these sends `Access-Control-Allow-Origin: *`, which is
      what makes a server unnecessary. Anthropic's status.anthropic.com 301s to status.claude.com —
      the final URL is used directly so the redirect cannot cost a second round trip. */
-  /* Every external service this app holds a credential for. Each endpoint returns JSON with
+  /* ⚠️ DERIVED FROM `.env.example` — every external service this app holds a credential for.
+     Owner: "i don't see higgsfield or some of the other services we use from time to time in
+     there...everything with an api key plesae." Each URL verified 2026-11-12 to return JSON with
      `Access-Control-Allow-Origin: *`, which is what makes a server unnecessary. */
   var VENDORS = [
     { name: "Supabase",   note: "database, auth, storage",  url: "https://status.supabase.com/api/v2/summary.json" },
@@ -107,9 +145,43 @@
 
   /* ⚠️ No browser-readable status page. Listed so their absence is a stated fact rather than a
      silent gap — Railway is covered better by the Waihana probe below, since it hosts us. */
-  /* Credentialed services publishing nothing a browser can read. Named rather than omitted —
-     an absent row reads as "fine", and these are not known to be fine. */
-  var UNREADABLE = ["Railway", "Postmark", "Higgsfield", "Meta / Instagram", "FedEx", "DHL", "Pexels", "Pixabay", "Freesound"];
+  /**
+   * ⛔ THE ONES WITH NO PUBLIC STATUS PAGE — DERIVED, NOT GIVEN UP ON.
+   *
+   * These nine are credentialed in `.env.example` and publish nothing a browser can read. Rather
+   * than nine grey "unknown" rows, each is PROBED DIRECTLY at the host Reef actually calls (hosts
+   * read out of `src/`, not guessed).
+   *
+   * ⚠️ HOW IT WORKS, AND WHAT IT HONESTLY PROVES. `fetch(url, {mode:"no-cors"})` returns an OPAQUE
+   * response: the body cannot be read, but the promise RESOLVES when the request completed at the
+   * network level and REJECTS when it did not. So this detects DNS failure, connection refused,
+   * TLS failure and total outage — the things that take a vendor completely off the air.
+   *
+   * ⛔ IT DOES NOT PROVE THE SERVICE IS HEALTHY. An HTTP 500 resolves exactly like a 200, because
+   * the status code is unreadable across origins. That is why these rows say "Answering", never
+   * "Operational" — claiming health this cannot see would be the cry-wolf failure running
+   * backwards, and a green row nobody should trust is worse than a grey one.
+   *
+   * ⚠️ Round-trip time is reported too: a host that normally answers in 100ms taking several
+   * seconds is a real signal even when it technically answered.
+   */
+  /* ⛔ THE API HOST, NOT THE TRACKING-LINK HOST. `www.fedex.com` and `www.dhl.com` appear in
+     `src/lib/shipping/tracking.ts` — they are the customer-facing links we PUT IN EMAILS, not the
+     endpoints that create labels (`apis.fedex.com`, `api-eu.dhl.com`, from `src/lib/shipping/fedex.ts`
+     and `src/lib/shipments/carriers/dhl.ts`). Probing the marketing site would report FedEx healthy
+     while label creation was dead — a green row that means nothing. Derived from src/, 2026-11-12. */
+  var PROBES = [
+    { name: "Postmark",        note: "email sending",       url: "https://api.postmarkapp.com/" },
+    { name: "Higgsfield",      note: "image and video gen", url: "https://api.higgsfield.ai/" },
+    { name: "Meta / Instagram", note: "social publishing",  url: "https://graph.facebook.com/" },
+    { name: "FedEx",           note: "shipping labels",     url: "https://apis.fedex.com/" },
+    { name: "DHL",             note: "shipping labels",     url: "https://api-eu.dhl.com/" },
+    { name: "Pexels",          note: "stock imagery",       url: "https://api.pexels.com/" },
+    { name: "Pixabay",         note: "stock imagery",       url: "https://pixabay.com/" },
+    { name: "Freesound",       note: "sound effects",       url: "https://freesound.org/" }
+  ];
+  /* Railway is deliberately absent: it HOSTS Reef, so the waihana.com check above is a better
+     answer about Railway than probing railway.com would be. */
 
   var HEALTH = "https://staff.waihana.com/api/health";
   var RANK = { none: 0, minor: 1, major: 2, critical: 3 };
@@ -135,7 +207,8 @@
     return d;
   }
 
-  /* Measured from THIS browser — the vantage point that matters. */
+  /* Is Waihana answering? Measured from THIS browser, which is the vantage point that matters —
+     if the owner cannot reach it, "the server is fine" is not an answer he can use. */
   function checkSelf() {
     return fetch(HEALTH + "?t=" + Date.now(), { cache: "no-store", signal: withTimeout(9000) })
       .then(function (r) { return { up: r.ok, code: r.status }; })
@@ -184,6 +257,19 @@
       .catch(function () { return { v: v, indicator: "unknown", desc: "Can’t reach status page", incidents: [] }; });
   }
 
+  /* ⚠️ SLOW IS A VERDICT, NOT A FAILURE. The threshold is generous because this measures from
+     wherever the owner is standing, which may be hotel wifi. */
+  var SLOW_MS = 2500;
+  function probeHost(pr) {
+    var t0 = Date.now();
+    return fetch(pr.url, { mode: "no-cors", cache: "no-store", signal: withTimeout(9000) })
+      .then(function () {
+        var ms = Date.now() - t0;
+        return { p: pr, up: true, ms: ms, slow: ms > SLOW_MS };
+      })
+      .catch(function () { return { p: pr, up: false, ms: Date.now() - t0, slow: false }; });
+  }
+
   function classOf(ind) {
     if (ind === "none") return "ok";
     if (ind === "minor") return "warn";
@@ -191,7 +277,7 @@
     return "unknown";
   }
 
-  function render(self, results) {
+  function render(self, results, probes) {
     var selfBox = el("self");
     selfBox.textContent = "";
     selfBox.appendChild(
@@ -207,7 +293,9 @@
       .sort(function (a, b) { return (RANK[b.indicator] || 0) - (RANK[a.indicator] || 0); })
       .forEach(function (r) {
         box.appendChild(row(r.v.name, r.v.note, classOf(r.indicator), r.desc));
-        /* Detail only on a row that is actually degraded. */
+        /* ⚠️ The owner's ask: "i think we should have the full provider description of the
+           partially degraded service for me to see so i don't have to go and look it up myself."
+           Only on a row that is actually degraded — a healthy provider gets no block. */
         if (r.indicator !== "none" && r.indicator !== "unknown" && r.incidents && r.incidents.length) {
           var d = document.createElement("div");
           d.className = "detail";
@@ -231,10 +319,31 @@
           box.appendChild(d);
         }
       });
-    box.appendChild(row("No public status feed", UNREADABLE.join(" · "), "unknown", ""));
+    probes
+      .slice()
+      .sort(function (a, b) { return (a.up ? 1 : 0) - (b.up ? 1 : 0); })
+      .forEach(function (r) {
+        box.appendChild(
+          row(
+            r.p.name,
+            r.p.note,
+            r.up ? (r.slow ? "warn" : "ok") : "bad",
+            /* ⛔ "Answering", never "Operational" — see the PROBES comment for why. */
+            r.up ? (r.slow ? "Answering, slowly (" + r.ms + "ms)" : "Answering (" + r.ms + "ms)") : "Not answering"
+          )
+        );
+      });
 
-    /* A provider can report all-clear while our own deploy is the cause. */
-    var hurting = results.filter(function (r) { return r.indicator === "major" || r.indicator === "critical"; });
+    /* ── THE VERDICT ──────────────────────────────────────────────────────────────────────────
+       ⛔ The "likely us" branch is the one that matters. On 2026-11-11 Railway's status page said
+       all systems operational while Reef was 502ing, because the cause was our own deploy rolling
+       out. A page that only ever reported vendor incidents would have shrugged at the very event
+       it was built for. */
+    /* A probed host that is not answering at all counts as "them" for the verdict — it is the
+       strongest signal these vendors can give, even if it cannot say why. */
+    var deadProbes = probes.filter(function (r) { return !r.up; });
+    var hurting = results.filter(function (r) { return r.indicator === "major" || r.indicator === "critical"; })
+      .concat(deadProbes.map(function (r) { return { v: { name: r.p.name } }; }));
     var minor = results.filter(function (r) { return r.indicator === "minor"; });
     var unreadable = results.filter(function (r) { return r.indicator === "unknown"; });
     var v = el("verdict"), b = el("because"), bar = el("bar");
@@ -277,8 +386,8 @@
     var btn = el("again");
     btn.disabled = true;
     btn.textContent = "Checking…";
-    Promise.all([checkSelf(), Promise.all(VENDORS.map(checkVendor))])
-      .then(function (out) { render(out[0], out[1]); })
+    Promise.all([checkSelf(), Promise.all(VENDORS.map(checkVendor)), Promise.all(PROBES.map(probeHost))])
+      .then(function (out) { render(out[0], out[1], out[2]); })
       .catch(function () {
         el("verdict").textContent = "Can’t tell.";
         el("because").textContent = "This device couldn’t reach anything at all — which usually means the problem is your own connection, not Waihana.";
