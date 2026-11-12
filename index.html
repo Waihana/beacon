@@ -12,8 +12,6 @@
 
   No build step, no dependencies, no CDN, no webfont, no server, no database, no secrets,
   no auth. It fetches when you open it, so it is current by construction.
-
-  Source of truth lives in the Waihana Reef repository; this is a published copy.
 -->
 <style>
   :root {
@@ -47,6 +45,12 @@
   .state { color: var(--dim); font-size: 13.5px; text-align: right; }
   .state.bad { color: var(--bad); } .state.warn { color: var(--warn); }
 
+  .detail { padding: 0 0 13px 21px; border-bottom: 1px solid var(--line); margin-top: -4px; }
+  .inc { margin: 0 0 9px; }
+  .inc:last-child { margin-bottom: 0; }
+  .inc b { display: block; font-weight: 600; font-size: 13.5px; color: var(--ink); }
+  .inc span { display: block; color: var(--dim); font-size: 13px; margin-top: 2px; }
+  .inc em { font-style: normal; color: var(--faint); font-size: 12px; }
   h2 { font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: var(--faint);
        margin: 30px 0 2px; font-weight: 600; }
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 4px 14px; }
@@ -83,20 +87,19 @@
 (function () {
   "use strict";
 
-  /* Each of these sends `Access-Control-Allow-Origin: *`, which is what makes a server
-     unnecessary. status.anthropic.com 301s to status.claude.com, so the final URL is used. */
+  /* Each sends `Access-Control-Allow-Origin: *`, which is what makes a server unnecessary. */
   var VENDORS = [
-    { name: "Supabase",   note: "database, auth, storage", url: "https://status.supabase.com/api/v2/status.json" },
-    { name: "Cloudflare", note: "DNS and edge",            url: "https://www.cloudflarestatus.com/api/v2/status.json" },
-    { name: "Shopify",    note: "orders and checkout",     url: "https://www.shopifystatus.com/api/v2/status.json" },
-    { name: "Twilio",     note: "calls and texts",         url: "https://status.twilio.com/api/v2/status.json" },
-    { name: "Claude",     note: "the assistant",           url: "https://status.claude.com/api/v2/status.json" },
-    { name: "ChatGPT",    note: "the assistant",           url: "https://status.openai.com/api/v2/status.json" },
-    { name: "LiveKit",    note: "huddles and voice",       url: "https://status.livekit.io/api/v2/status.json" },
-    { name: "Deepgram",   note: "transcription",           url: "https://status.deepgram.com/api/v2/status.json" }
+    { name: "Supabase",   note: "database, auth, storage", url: "https://status.supabase.com/api/v2/summary.json" },
+    { name: "Cloudflare", note: "DNS and edge",            url: "https://www.cloudflarestatus.com/api/v2/summary.json" },
+    { name: "Shopify",    note: "orders and checkout",     url: "https://www.shopifystatus.com/api/v2/summary.json" },
+    { name: "Twilio",     note: "calls and texts",         url: "https://status.twilio.com/api/v2/summary.json" },
+    { name: "Claude",     note: "the assistant",           url: "https://status.claude.com/api/v2/summary.json" },
+    { name: "ChatGPT",    note: "the assistant",           url: "https://status.openai.com/api/v2/summary.json" },
+    { name: "LiveKit",    note: "huddles and voice",       url: "https://status.livekit.io/api/v2/summary.json" },
+    { name: "Deepgram",   note: "transcription",           url: "https://status.deepgram.com/api/v2/summary.json" }
   ];
 
-  /* No browser-readable status page. Listed so their absence is stated rather than silent. */
+  /* No browser-readable status page. Stated rather than silently omitted. */
   var UNREADABLE = [
     { name: "Railway", note: "hosts Reef — covered by the Waihana check above" },
     { name: "Postmark", note: "email sending — publishes no readable status" }
@@ -137,12 +140,24 @@
     return fetch(v.url, { cache: "no-store", signal: withTimeout(9000) })
       .then(function (r) { return r.json(); })
       .then(function (j) {
-        var s = (j && j.status) || {};
-        return { v: v, indicator: s.indicator || "none", desc: s.description || "Operational" };
+        var st = (j && j.status) || {};
+        /* ⛔ INCIDENTS, NOT COMPONENTS. Cloudflare alone lists ~80 non-operational components at any
+           moment — individual city PoPs under maintenance. Showing those would bury the one line
+           that matters under a list nobody can read, which is how a status page gets ignored. */
+        var inc = (j && j.incidents ? j.incidents : []).slice(0, 2).map(function (i) {
+          var u = (i.incident_updates || [])[0] || {};
+          return {
+            name: i.name || "Incident",
+            body: (u.body || "").replace(/\s+/g, " ").trim(),
+            since: i.started_at || null,
+            impact: i.impact || "none"
+          };
+        });
+        return { v: v, indicator: st.indicator || "none", desc: st.description || "Operational", incidents: inc };
       })
       /* ⚠️ A failed read is NOT an outage. Saying "Supabase is down" because a status page would
          not load is the cry-wolf failure this page exists to avoid. */
-      .catch(function () { return { v: v, indicator: "unknown", desc: "Can’t reach status page" }; });
+      .catch(function () { return { v: v, indicator: "unknown", desc: "Can’t reach status page", incidents: [] }; });
   }
 
   function classOf(ind) {
@@ -168,11 +183,33 @@
       .sort(function (a, b) { return (RANK[b.indicator] || 0) - (RANK[a.indicator] || 0); })
       .forEach(function (r) {
         box.appendChild(row(r.v.name, r.v.note, classOf(r.indicator), r.desc));
+        /* Detail only on a row that is actually degraded. */
+        if (r.indicator !== "none" && r.indicator !== "unknown" && r.incidents && r.incidents.length) {
+          var d = document.createElement("div");
+          d.className = "detail";
+          r.incidents.forEach(function (i) {
+            var w = document.createElement("p");
+            w.className = "inc";
+            var b = document.createElement("b");
+            b.textContent = i.name;
+            var sp = document.createElement("span");
+            sp.textContent = i.body || "No detail published yet.";
+            w.appendChild(b);
+            w.appendChild(sp);
+            if (i.since) {
+              var e2 = document.createElement("em");
+              var t = new Date(i.since);
+              e2.textContent = "since " + t.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+              w.appendChild(e2);
+            }
+            d.appendChild(w);
+          });
+          box.appendChild(d);
+        }
       });
     UNREADABLE.forEach(function (u) { box.appendChild(row(u.name, u.note, "unknown", "No public feed")); });
 
-    /* The "probably us" branch matters most: a provider's status page can report all-clear while
-       our own deploy is the cause. */
+    /* A provider can report all-clear while our own deploy is the cause. */
     var hurting = results.filter(function (r) { return r.indicator === "major" || r.indicator === "critical"; });
     var minor = results.filter(function (r) { return r.indicator === "minor"; });
     var unreadable = results.filter(function (r) { return r.indicator === "unknown"; });
