@@ -53,6 +53,14 @@
     -webkit-font-smoothing: antialiased;
   }
   .wrap { max-width: 34rem; margin: 0 auto; }
+  /* ⚠️ The map is an ASIDE in the literal sense: it earns a column when there is one to spare and
+     stacks underneath when there is not. Nothing in it is load-bearing for the verdict, so a
+     phone loses nothing by seeing it last. */
+  @media (min-width: 64rem) {
+    .wrap { max-width: 62rem; }
+    .cols { display: grid; grid-template-columns: minmax(0, 1fr) 20rem; gap: 34px; align-items: start; }
+    .aside { position: sticky; top: 20px; }
+  }
   .eyebrow { font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: var(--faint); margin: 0 0 14px; }
   /* The verdict is the page. Everything else is evidence for it. */
   .verdict { font-size: clamp(26px, 8vw, 38px); line-height: 1.12; font-weight: 650; letter-spacing: -.02em; margin: 0; }
@@ -60,8 +68,78 @@
   .bar { height: 3px; border-radius: 2px; margin: 20px 0 24px; background: var(--line); }
   .bar.ok { background: var(--ok); } .bar.warn { background: var(--warn); } .bar.bad { background: var(--bad); }
 
-  .row { display: flex; align-items: center; gap: 12px; padding: 13px 0; border-bottom: 1px solid var(--line); }
-  .row:last-child { border-bottom: 0; }
+  /* ── THE CIRCUIT MAP ───────────────────────────────────────────────────────────────────────
+     Two real places, not a decoration: Honolulu (where the owner and Cloudflare's nearest edge
+     are) and US-West (where Railway and Supabase sit, co-located on purpose). The arc between
+     them is the path a request actually takes, and it carries the worst state on that path. */
+  .map { padding: 14px 14px 6px; }
+  .map svg { display: block; width: 100%; height: auto; }
+  .sea { fill: #0d141c; }
+  .grid-line { stroke: #16202b; stroke-width: .6; }
+  .land { fill: #16202b; }
+  .arc { fill: none; stroke: var(--faint); stroke-width: 1.4; stroke-dasharray: 3 4; opacity: .75; }
+  .arc.ok { stroke: var(--ok); } .arc.warn { stroke: var(--warn); } .arc.bad { stroke: var(--bad); }
+  .pin { fill: none; stroke-width: 1.6; stroke: var(--faint); }
+  .pin.ok { stroke: var(--ok); } .pin.warn { stroke: var(--warn); } .pin.bad { stroke: var(--bad); }
+  .pin-core { fill: var(--faint); }
+  .pin-core.ok { fill: var(--ok); } .pin-core.warn { fill: var(--warn); } .pin-core.bad { fill: var(--bad); }
+  .place { font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; fill: var(--dim); }
+  .svc { font-size: 9px; fill: var(--faint); }
+  /* A single travelling pulse — it encodes "traffic is flowing", and stops dead when it isn't. */
+  .pulse { fill: var(--ok); }
+  @media (prefers-reduced-motion: reduce) { .pulse { display: none; } }
+
+  .hops { list-style: none; margin: 12px 0 0; padding: 10px 0 0; border-top: 1px solid var(--line); }
+  .hop { display: flex; align-items: center; gap: 9px; padding: 5px 0; font-size: 12.5px; color: var(--dim); }
+  .hop .dot { width: 7px; height: 7px; }
+  .hop b { font-weight: 500; color: var(--ink); }
+  .hop span { margin-left: auto; color: var(--faint); font-size: 11.5px; }
+
+  /* ── VIEW TOGGLE + GRAPH ───────────────────────────────────────────────────────────────────
+     The graph is the Railway-dashboard view: every provider as a node under the capability it
+     serves, drillable. It is DERIVED from the same results the rows are, so it can never tell a
+     different story than the list beside it. */
+  .segbar { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; }
+  .seg { flex: 0 0 auto; background: transparent; color: var(--faint); border: 1px solid var(--line);
+         border-radius: 7px; padding: 4px 10px; font: inherit; font-size: 12px; cursor: pointer; }
+  .seg[aria-pressed="true"] { color: var(--ink); border-color: var(--faint); }
+  .seg.icon { margin-left: auto; padding: 4px 8px; }
+  .graphbox { position: relative; overflow: hidden; touch-action: none; cursor: grab; }
+  .graphbox.dragging { cursor: grabbing; }
+  .graphbox svg { display: block; width: 100%; height: 230px; }
+  body.mapfull .graphbox svg { height: 62vh; }
+  @media (min-width: 64rem) { body.mapfull .cols { grid-template-columns: 1fr; } body.mapfull .aside { order: -1; position: static; } }
+  .gnode rect { fill: var(--panel); stroke: var(--line); stroke-width: 1; rx: 6; }
+  .gnode.root rect { stroke: var(--faint); }
+  .gnode text { font-size: 10px; fill: var(--ink); }
+  .gnode .sub { font-size: 8.5px; fill: var(--faint); }
+  .gnode { cursor: pointer; }
+  .gnode.leaf { cursor: default; }
+  .gedge { fill: none; stroke: var(--line); stroke-width: 1.2; }
+  .gedge.ok { stroke: #1f4d3c; } .gedge.warn { stroke: #5c431c; } .gedge.bad { stroke: #5c2419; }
+  .gdot { r: 3.2; fill: var(--faint); }
+  .gdot.ok { fill: var(--ok); } .gdot.warn { fill: var(--warn); }
+  .gdot.bad { fill: var(--bad); } .gdot.unknown { fill: var(--faint); }
+  .ghint { color: var(--faint); font-size: 11.5px; margin: 9px 0 0; }
+
+  .item { border-bottom: 1px solid var(--line); }
+  .item:last-child { border-bottom: 0; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 13px 0; width: 100%;
+         background: none; border: 0; color: inherit; font: inherit; text-align: left; }
+  button.row { cursor: pointer; }
+  button.row:hover .name { color: #fff; }
+  button.row:focus-visible { outline: 2px solid var(--faint); outline-offset: 2px; border-radius: 6px; }
+  .chev { flex: 0 0 auto; width: 9px; color: var(--faint); font-size: 10px; transition: transform .15s ease; }
+  .item.open .chev { transform: rotate(90deg); }
+  @media (prefers-reduced-motion: reduce) { .chev { transition: none; } }
+
+  /* The verbose panel. ⛔ Public page — see the note above VENDORS for what may never go here. */
+  .expand { padding: 2px 0 14px 21px; }
+  .kv { display: flex; gap: 10px; font-size: 12.5px; padding: 3px 0; }
+  .kv dt { flex: 0 0 5.6rem; color: var(--faint); margin: 0; }
+  .kv dd { margin: 0; color: var(--dim); }
+  .expand a { color: var(--dim); font-size: 12.5px; }
+  .expand a:hover { color: var(--ink); }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--faint); flex: 0 0 auto; }
   .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); }
   .dot.bad { background: var(--bad); } .dot.unknown { background: var(--faint); }
@@ -99,6 +177,8 @@
   <p class="because" id="because">Asking Waihana and every provider it depends on.</p>
   <div class="bar" id="bar"></div>
 
+  <div class="cols">
+   <div class="maincol">
   <h2>Waihana</h2>
   <div class="panel"><div id="self"></div></div>
 
@@ -109,6 +189,66 @@
     Providers below the line publish no status page, so Reef asks their API host directly.
     “Answering” means the host responded — not that the service is healthy.
   </p>
+
+   </div>
+
+   <aside class="aside">
+    <div class="segbar">
+      <button class="seg" id="segMap" type="button" aria-pressed="true">Map</button>
+      <button class="seg" id="segGraph" type="button" aria-pressed="false">Graph</button>
+      <button class="seg icon" id="segWide" type="button" aria-pressed="false" title="Expand">&#10530;</button>
+    </div>
+
+    <div class="panel map" id="viewMap">
+      <!-- ⚠️ Schematic, not cartography. Two places, because those are the two that exist: the
+           owner and Cloudflare's nearest edge are in Honolulu; Railway and Supabase are both in
+           US-West, co-located deliberately. The label stays "US-West" — the exact datacenter
+           city is not something this page can verify, so it does not claim one. -->
+      <svg viewBox="0 0 320 196" role="img" aria-labelledby="maptitle">
+        <title id="maptitle">Where Waihana runs, and the path between</title>
+        <rect class="sea" x="0" y="0" width="320" height="196"/>
+        <g class="grid-line" stroke-linecap="round">
+          <line x1="0" y1="49" x2="320" y2="49"/><line x1="0" y1="98" x2="320" y2="98"/>
+          <line x1="0" y1="147" x2="320" y2="147"/>
+          <line x1="80" y1="0" x2="80" y2="196"/><line x1="160" y1="0" x2="160" y2="196"/>
+          <line x1="240" y1="0" x2="240" y2="196"/>
+        </g>
+        <!-- North America, west coast -->
+        <path class="land" d="M320,0 L320,196 L268,196 C264,178 258,160 252,142 C246,122 240,104 238,84 C236,62 242,40 252,22 C258,12 264,5 268,0 Z"/>
+        <!-- The Hawaiian chain -->
+        <g class="land">
+          <ellipse cx="48" cy="139" rx="3.4" ry="2.2"/><ellipse cx="56" cy="143" rx="2.6" ry="1.8"/>
+          <ellipse cx="63" cy="146" rx="3.8" ry="2.4"/><ellipse cx="71" cy="150" rx="2.4" ry="1.7"/>
+          <ellipse cx="79" cy="155" rx="5.2" ry="3.4"/>
+        </g>
+        <path class="arc" id="arcPath" d="M66,142 C120,96 196,70 246,70"/>
+        <circle class="pulse" r="2.2" id="pulse"><animateMotion dur="3.4s" repeatCount="indefinite"
+          path="M66,142 C120,96 196,70 246,70"/></circle>
+
+        <g id="pinHNL">
+          <circle class="pin" cx="66" cy="142" r="8"/>
+          <circle class="pin-core" cx="66" cy="142" r="2.6"/>
+          <text class="place" x="66" y="166" text-anchor="middle">Honolulu</text>
+          <text class="svc" x="66" y="177" text-anchor="middle">You · Cloudflare edge</text>
+        </g>
+        <g id="pinUSW">
+          <circle class="pin" cx="246" cy="70" r="8"/>
+          <circle class="pin-core" cx="246" cy="70" r="2.6"/>
+          <text class="place" x="246" y="48" text-anchor="middle">US-West</text>
+          <text class="svc" x="246" y="37" text-anchor="middle">Railway · Supabase</text>
+        </g>
+      </svg>
+      <ul class="hops" id="hops"></ul>
+    </div>
+
+    <div class="panel graphbox" id="viewGraph" hidden>
+      <svg viewBox="0 0 420 300" id="gsvg" role="img" aria-label="Every provider, grouped by what it does">
+        <g id="gz"></g>
+      </svg>
+    </div>
+    <p class="ghint" id="ghint" hidden>Drag to pan, scroll to zoom, tap a group to open it.</p>
+   </aside>
+  </div>
 
   <footer>
     <span id="stamp">—</span>
@@ -127,20 +267,39 @@
      Owner: "i don't see higgsfield or some of the other services we use from time to time in
      there...everything with an api key plesae." Each URL verified 2026-11-12 to return JSON with
      `Access-Control-Allow-Origin: *`, which is what makes a server unnecessary. */
+  /**
+   * ⛔ THIS PAGE IS PUBLIC, AND EVERY FIELD HERE IS WRITTEN ON THAT ASSUMPTION.
+   *
+   * Owner, 2026-11-12: *"verbose details that would be pertinent for me without exposing myself
+   * to an attacker."* The rule that follows from it: NOTHING on the Beacon may be anything an
+   * attacker could not already learn from `dig`, a TLS handshake and this page's own source.
+   *
+   * What that admits: vendor names (already in the rows), their OWN published incident text,
+   * links to their OWN status pages, and the public API host everyone who uses that vendor
+   * calls. What it excludes, permanently: internal module and surface names, env var names,
+   * service names, account identifiers, internal hostnames, and anything describing how Reef is
+   * put together. `affects` below is written in customer words on purpose — "email sending", not
+   * the module that sends it.
+   *
+   * ⚠️ The verbose internal view — which Reef surface breaks, which credential, which worker —
+   * belongs in the OUTPOST, behind the owner gate, inside Reef. Same question, two audiences;
+   * the split is the security control, and collapsing it is how a status page becomes a map for
+   * somebody else.
+   */
   var VENDORS = [
-    { name: "Supabase",   note: "database, auth, storage",  url: "https://status.supabase.com/api/v2/summary.json" },
-    { name: "Cloudflare", note: "DNS and edge",             url: "https://www.cloudflarestatus.com/api/v2/summary.json" },
-    { name: "Shopify",    note: "orders and checkout",      url: "https://www.shopifystatus.com/api/v2/summary.json" },
-    { name: "Twilio",     note: "calls and texts",          url: "https://status.twilio.com/api/v2/summary.json" },
-    { name: "Claude",     note: "the assistant",            url: "https://status.claude.com/api/v2/summary.json" },
-    { name: "ChatGPT",    note: "the assistant",            url: "https://status.openai.com/api/v2/summary.json" },
-    { name: "LiveKit",    note: "huddles and voice",        url: "https://status.livekit.io/api/v2/summary.json" },
-    { name: "Deepgram",   note: "transcription",            url: "https://status.deepgram.com/api/v2/summary.json" },
-    { name: "Sentry",     note: "error reporting",          url: "https://status.sentry.io/api/v2/summary.json" },
-    { name: "ElevenLabs", note: "voice synthesis",          url: "https://status.elevenlabs.io/api/v2/summary.json" },
-    { name: "Dropbox",    note: "file sync",                url: "https://status.dropbox.com/api/v2/summary.json" },
+    { name: "Supabase",   note: "database, auth, storage",  affects: "Signing in, and everything saved",     home: "https://status.supabase.com",      url: "https://status.supabase.com/api/v2/summary.json" },
+    { name: "Cloudflare", note: "DNS and edge",             affects: "Reaching the site at all",             home: "https://www.cloudflarestatus.com", url: "https://www.cloudflarestatus.com/api/v2/summary.json" },
+    { name: "Shopify",    note: "orders and checkout",      affects: "Orders, products and the storefront",  home: "https://www.shopifystatus.com",    url: "https://www.shopifystatus.com/api/v2/summary.json" },
+    { name: "Twilio",     note: "calls and texts",          affects: "Phone calls and text messages",        home: "https://status.twilio.com",        url: "https://status.twilio.com/api/v2/summary.json" },
+    { name: "Claude",     note: "the assistant",            affects: "The assistant and its replies",        home: "https://status.claude.com",        url: "https://status.claude.com/api/v2/summary.json" },
+    { name: "ChatGPT",    note: "the assistant",            affects: "Some assistant features",              home: "https://status.openai.com",        url: "https://status.openai.com/api/v2/summary.json" },
+    { name: "LiveKit",    note: "huddles and voice",        affects: "Huddles and live voice",               home: "https://status.livekit.io",        url: "https://status.livekit.io/api/v2/summary.json" },
+    { name: "Deepgram",   note: "transcription",            affects: "Turning speech into text",             home: "https://status.deepgram.com",      url: "https://status.deepgram.com/api/v2/summary.json" },
+    { name: "Sentry",     note: "error reporting",          affects: "Noticing errors — not causing them",   home: "https://status.sentry.io",         url: "https://status.sentry.io/api/v2/summary.json" },
+    { name: "ElevenLabs", note: "voice synthesis",          affects: "Spoken replies",                       home: "https://status.elevenlabs.io",     url: "https://status.elevenlabs.io/api/v2/summary.json" },
+    { name: "Dropbox",    note: "file sync",                affects: "Importing files from Dropbox",         home: "https://status.dropbox.com",       url: "https://status.dropbox.com/api/v2/summary.json" },
     /* ⚠️ Google publishes an incident ARRAY, not a statuspage summary — handled by `kind`. */
-    { name: "Google",     note: "maps and sign-in",         url: "https://status.cloud.google.com/incidents.json", kind: "gcp" }
+    { name: "Google",     note: "maps and sign-in",         affects: "Maps and Google sign-in",              home: "https://status.cloud.google.com",  url: "https://status.cloud.google.com/incidents.json", kind: "gcp" }
   ];
 
   /* ⚠️ No browser-readable status page. Listed so their absence is a stated fact rather than a
@@ -171,14 +330,14 @@
      and `src/lib/shipments/carriers/dhl.ts`). Probing the marketing site would report FedEx healthy
      while label creation was dead — a green row that means nothing. Derived from src/, 2026-11-12. */
   var PROBES = [
-    { name: "Postmark",        note: "email sending",       url: "https://api.postmarkapp.com/" },
-    { name: "Higgsfield",      note: "image and video gen", url: "https://api.higgsfield.ai/" },
-    { name: "Meta / Instagram", note: "social publishing",  url: "https://graph.facebook.com/" },
-    { name: "FedEx",           note: "shipping labels",     url: "https://apis.fedex.com/" },
-    { name: "DHL",             note: "shipping labels",     url: "https://api-eu.dhl.com/" },
-    { name: "Pexels",          note: "stock imagery",       url: "https://api.pexels.com/" },
-    { name: "Pixabay",         note: "stock imagery",       url: "https://pixabay.com/" },
-    { name: "Freesound",       note: "sound effects",       url: "https://freesound.org/" }
+    { name: "Postmark",        note: "email sending",       affects: "Sending and receiving email",       url: "https://api.postmarkapp.com/" },
+    { name: "Higgsfield",      note: "image and video gen", affects: "Generating images and video", url: "https://api.higgsfield.ai/" },
+    { name: "Meta / Instagram", note: "social publishing",  affects: "Posting to Instagram and Facebook",  url: "https://graph.facebook.com/" },
+    { name: "FedEx",           note: "shipping labels",     affects: "FedEx labels and rates",     url: "https://apis.fedex.com/" },
+    { name: "DHL",             note: "shipping labels",     affects: "DHL labels and rates",     url: "https://api-eu.dhl.com/" },
+    { name: "Pexels",          note: "stock imagery",       affects: "Searching stock photos",       url: "https://api.pexels.com/" },
+    { name: "Pixabay",         note: "stock imagery",       affects: "Searching stock photos",       url: "https://pixabay.com/" },
+    { name: "Freesound",       note: "sound effects",       affects: "Sound effects for video",       url: "https://freesound.org/" }
   ];
   /* Railway is deliberately absent: it HOSTS Reef, so the waihana.com check above is a better
      answer about Railway than probing railway.com would be. */
@@ -193,17 +352,62 @@
     return c.signal;
   }
 
-  function row(name, note, cls, state) {
-    var d = document.createElement("div");
-    d.className = "row";
-    d.innerHTML =
+  /**
+   * One provider line. The row itself is a BUTTON — owner, 2026-11-12: *"i'd like to be able to
+   * press/click on any of these lines to get verbose details."*
+   *
+   * ⚠️ A row that is degraded opens itself. The earlier ask ("so i don't have to go and look it
+   * up myself") was about NOT having to click; making everything click-to-open would have
+   * quietly taken that back, so the two behaviours sit side by side: trouble is shown, detail is
+   * offered.
+   */
+  function row(name, note, cls, state, detail) {
+    var item = document.createElement("div");
+    item.className = "item";
+
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = "row";
+    b.innerHTML =
       '<span class="dot ' + cls + '"></span>' +
       '<span class="name"></span>' +
-      '<span class="state ' + (cls === "bad" ? "bad" : cls === "warn" ? "warn" : "") + '"></span>';
-    var n = d.querySelector(".name");
+      '<span class="state ' + (cls === "bad" ? "bad" : cls === "warn" ? "warn" : "") + '"></span>' +
+      '<span class="chev" aria-hidden="true">&#9654;</span>';
+    var n = b.querySelector(".name");
     n.textContent = name;
-    if (note) { var s = document.createElement("small"); s.textContent = note; n.appendChild(s); }
-    d.querySelector(".state").textContent = state;
+    if (note) { var sm = document.createElement("small"); sm.textContent = note; n.appendChild(sm); }
+    b.querySelector(".state").textContent = state;
+    item.appendChild(b);
+
+    if (!detail) {
+      b.querySelector(".chev").remove();
+      b.disabled = true;
+      b.classList.add("static");
+      return item;
+    }
+
+    var panel = document.createElement("div");
+    panel.className = "expand";
+    panel.hidden = true;
+    panel.appendChild(detail);
+    item.appendChild(panel);
+
+    b.setAttribute("aria-expanded", "false");
+    b.addEventListener("click", function () {
+      var open = panel.hidden;
+      panel.hidden = !open;
+      item.classList.toggle("open", open);
+      b.setAttribute("aria-expanded", open ? "true" : "false");
+    });
+    return item;
+  }
+
+  function kv(k, v) {
+    var d = document.createElement("dl");
+    d.className = "kv";
+    var dt = document.createElement("dt"); dt.textContent = k;
+    var dd = document.createElement("dd"); dd.textContent = v;
+    d.appendChild(dt); d.appendChild(dd);
     return d;
   }
 
@@ -288,50 +492,83 @@
 
     var box = el("vendors");
     box.textContent = "";
+
+    /** Incident paragraphs — the vendor's OWN published words, which are already public. */
+    function incidentNodes(incidents) {
+      var frag = document.createDocumentFragment();
+      (incidents || []).forEach(function (i) {
+        var w = document.createElement("p");
+        w.className = "inc";
+        var b = document.createElement("b");
+        b.textContent = i.name;
+        var sp = document.createElement("span");
+        sp.textContent = i.body || "No detail published yet.";
+        w.appendChild(b); w.appendChild(sp);
+        if (i.since) {
+          var e2 = document.createElement("em");
+          var t = new Date(i.since);
+          e2.textContent = "since " + t.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+          w.appendChild(e2);
+        }
+        frag.appendChild(w);
+      });
+      return frag;
+    }
+
+    function link(href, text) {
+      var a = document.createElement("a");
+      a.href = href; a.target = "_blank"; a.rel = "noopener noreferrer";
+      a.textContent = text + " \u2197";
+      return a;
+    }
+
     results
       .slice()
       .sort(function (a, b) { return (RANK[b.indicator] || 0) - (RANK[a.indicator] || 0); })
       .forEach(function (r) {
-        box.appendChild(row(r.v.name, r.v.note, classOf(r.indicator), r.desc));
-        /* ⚠️ The owner's ask: "i think we should have the full provider description of the
-           partially degraded service for me to see so i don't have to go and look it up myself."
-           Only on a row that is actually degraded — a healthy provider gets no block. */
+        var det = document.createDocumentFragment();
+        det.appendChild(kv("Affects", r.v.affects || r.v.note));
+        det.appendChild(kv("Status", r.desc));
+        det.appendChild(kv("How we know", "Their own public status feed"));
+        det.appendChild(incidentNodes(r.incidents));
+        if (r.v.home) det.appendChild(link(r.v.home, r.v.home.replace(/^https:\/\//, "")));
+
+        var cls = classOf(r.indicator);
+        var item = row(r.v.name, r.v.note, cls, r.desc, det);
+        box.appendChild(item);
+
+        /* ⚠️ Trouble OPENS ITSELF. The owner asked for degraded detail without having to go look
+           it up; click-to-open everything would have quietly withdrawn that. */
         if (r.indicator !== "none" && r.indicator !== "unknown" && r.incidents && r.incidents.length) {
-          var d = document.createElement("div");
-          d.className = "detail";
-          r.incidents.forEach(function (i) {
-            var w = document.createElement("p");
-            w.className = "inc";
-            var b = document.createElement("b");
-            b.textContent = i.name;
-            var sp = document.createElement("span");
-            sp.textContent = i.body || "No detail published yet.";
-            w.appendChild(b);
-            w.appendChild(sp);
-            if (i.since) {
-              var e2 = document.createElement("em");
-              var t = new Date(i.since);
-              e2.textContent = "since " + t.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-              w.appendChild(e2);
-            }
-            d.appendChild(w);
-          });
-          box.appendChild(d);
+          item.querySelector(".row").click();
         }
       });
+
     probes
       .slice()
       .sort(function (a, b) { return (a.up ? 1 : 0) - (b.up ? 1 : 0); })
       .forEach(function (r) {
-        box.appendChild(
-          row(
-            r.p.name,
-            r.p.note,
-            r.up ? (r.slow ? "warn" : "ok") : "bad",
-            /* ⛔ "Answering", never "Operational" — see the PROBES comment for why. */
-            r.up ? (r.slow ? "Answering, slowly (" + r.ms + "ms)" : "Answering (" + r.ms + "ms)") : "Not answering"
-          )
-        );
+        var host = r.p.url.replace(/^https:\/\//, "").replace(/\/$/, "");
+        var det = document.createDocumentFragment();
+        det.appendChild(kv("Affects", r.p.affects || r.p.note));
+        det.appendChild(kv("How we know", "They publish no status page, so this page asks " + host + " directly"));
+        det.appendChild(kv("Result", r.up
+          ? "Answered in " + r.ms + "ms" + (r.slow ? " — slower than usual" : "")
+          : "No answer within 9 seconds"));
+        /* ⛔ The limit, stated where it is relevant rather than in a footnote nobody reads. */
+        det.appendChild(kv("Caveat", r.up
+          ? "The reply is opaque across origins, so this shows the host answered — not that the service is healthy."
+          : "Could be the provider, or your own connection. If every row is red, suspect the connection."));
+        det.appendChild(kv("Measured", "From your browser, just now"));
+
+        box.appendChild(row(
+          r.p.name,
+          r.p.note,
+          r.up ? (r.slow ? "warn" : "ok") : "bad",
+          /* ⛔ "Answering", never "Operational" — see the PROBES comment for why. */
+          r.up ? (r.slow ? "Answering, slowly (" + r.ms + "ms)" : "Answering (" + r.ms + "ms)") : "Not answering",
+          det
+        ));
       });
 
     /* ── THE VERDICT ──────────────────────────────────────────────────────────────────────────
@@ -397,7 +634,230 @@
     }
 
     el("stamp").textContent = "Checked " + new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
+
+    drawCircuit(self, results);
+    drawGraph(self, results, probes);
   }
+
+  /* ───────────────────────────────────────────────────────────────────────────────────────────
+     THE CIRCUIT — the path a request actually takes, as four hops in two places.
+
+     ⚠️ Railway's hop is derived, not read. Railway publishes nothing a browser can reach, but it
+     HOSTS Reef: if waihana.com answered, Railway served it. That is a stronger statement about
+     the thing we care about than its global status page would be.
+     ─────────────────────────────────────────────────────────────────────────────────────────── */
+  function byName(results, name) {
+    for (var i = 0; i < results.length; i++) if (results[i].v.name === name) return results[i];
+    return null;
+  }
+  var SEV = { ok: 0, unknown: 1, warn: 2, bad: 3 };
+  function worstClass(list) {
+    var w = "ok";
+    list.forEach(function (c) { if (SEV[c] > SEV[w]) w = c; });
+    return w;
+  }
+
+  function drawCircuit(self, results) {
+    var cf = byName(results, "Cloudflare"), sb = byName(results, "Supabase");
+    var hops = [
+      { name: "You", where: "Honolulu", cls: "ok", note: "this page loaded" },
+      { name: "Cloudflare", where: "Honolulu edge", cls: classOf(cf && cf.indicator), note: cf ? cf.desc : "—" },
+      { name: "Railway", where: "US-West", cls: self.up ? "ok" : "bad", note: self.up ? "served waihana.com" : "no answer" },
+      { name: "Supabase", where: "US-West", cls: classOf(sb && sb.indicator), note: sb ? sb.desc : "—" }
+    ];
+
+    var ul = el("hops");
+    ul.textContent = "";
+    hops.forEach(function (h) {
+      var li = document.createElement("li");
+      li.className = "hop";
+      var d = document.createElement("i"); d.className = "dot " + h.cls;
+      var b = document.createElement("b"); b.textContent = h.name;
+      var w = document.createElement("span"); w.textContent = h.where;
+      li.appendChild(d); li.appendChild(b); li.appendChild(w);
+      li.title = h.note;
+      ul.appendChild(li);
+    });
+
+    /* Each pin carries the worst state of what lives there — "everything green in the places it
+       resides", and honestly amber the moment one of them is not. */
+    var hnl = worstClass([hops[0].cls, hops[1].cls]);
+    var usw = worstClass([hops[2].cls, hops[3].cls]);
+    paintPin("pinHNL", hnl); paintPin("pinUSW", usw);
+    var arc = document.getElementById("arcPath");
+    arc.setAttribute("class", "arc " + worstClass([hnl, usw]));
+    var pulse = document.getElementById("pulse");
+    if (pulse) pulse.style.display = self.up ? "" : "none";
+  }
+
+  function paintPin(id, cls) {
+    var g = document.getElementById(id);
+    g.querySelector(".pin").setAttribute("class", "pin " + cls);
+    g.querySelector(".pin-core").setAttribute("class", "pin-core " + cls);
+  }
+
+  /* ───────────────────────────────────────────────────────────────────────────────────────────
+     THE GRAPH — every provider under the capability it serves, drillable.
+
+     ⚠️ GROUPED BY WHAT BREAKS, NOT BY VENDOR TYPE. The question this page answers is "what can't
+     I do right now", so "Voice" holds LiveKit, Deepgram and ElevenLabs together even though they
+     are three unrelated companies — losing any of them costs you the same thing.
+
+     ⛔ Built from the SAME results as the rows beside it, so the two can never disagree. A
+     diagram that drifts from the list it sits next to is worse than no diagram: it is a second
+     answer, and the reader cannot tell which one is stale.
+     ─────────────────────────────────────────────────────────────────────────────────────────── */
+  var GROUPS = [
+    { label: "Reaching the site", of: ["Cloudflare"] },
+    { label: "App and data",      of: ["Supabase"] },
+    { label: "Store",             of: ["Shopify"] },
+    { label: "Messaging",         of: ["Postmark", "Twilio"] },
+    { label: "The assistant",     of: ["Claude", "ChatGPT"] },
+    { label: "Voice",             of: ["LiveKit", "Deepgram", "ElevenLabs"] },
+    { label: "Media",             of: ["Higgsfield", "Pexels", "Pixabay", "Freesound"] },
+    { label: "Shipping",          of: ["FedEx", "DHL"] },
+    { label: "Social",            of: ["Meta / Instagram"] },
+    { label: "Behind the scenes", of: ["Sentry", "Dropbox", "Google"] }
+  ];
+  var openGroups = {};
+  var SVGNS = "http://www.w3.org/2000/svg";
+  function svgEl(n, attrs) {
+    var e = document.createElementNS(SVGNS, n);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+
+  function drawGraph(self, results, probes) {
+    /* name -> class, from the live results. Anything we did not measure stays "unknown". */
+    var state = {};
+    results.forEach(function (r) { state[r.v.name] = classOf(r.indicator); });
+    probes.forEach(function (r) { state[r.p.name] = r.up ? (r.slow ? "warn" : "ok") : "bad"; });
+
+    var g = document.getElementById("gz");
+    g.textContent = "";
+
+    var rows = [], y = 16;
+    GROUPS.forEach(function (grp) {
+      var members = grp.of.filter(function (n) { return n in state; });
+      if (!members.length) return;
+      var open = !!openGroups[grp.label];
+      rows.push({ grp: grp, members: members, y: y, open: open,
+                  cls: worstClass(members.map(function (n) { return state[n]; })) });
+      y += open ? Math.max(34, members.length * 26 + 10) : 34;
+    });
+    var totalH = y + 10;
+    document.getElementById("gsvg").setAttribute("viewBox", "0 0 420 " + Math.max(300, totalH));
+
+    var rootY = totalH / 2;
+    var selfCls = self.up ? "ok" : "bad";
+    g.appendChild(node(10, rootY - 14, 84, 28, "Waihana", self.up ? "answering" : "not answering", selfCls, "root"));
+
+    rows.forEach(function (r) {
+      g.appendChild(edge(94, rootY, 150, r.y + 13, r.cls));
+      var label = r.grp.label + (r.open ? "" : "  (" + r.members.length + ")");
+      var gn = node(150, r.y, 118, 26, label, null, r.cls, "");
+      gn.addEventListener("click", function () {
+        if (graphDragged) return;
+        openGroups[r.grp.label] = !openGroups[r.grp.label];
+        drawGraph(self, results, probes);
+      });
+      g.appendChild(gn);
+
+      if (r.open) {
+        r.members.forEach(function (nm, i) {
+          var my = r.y + i * 26;
+          g.appendChild(edge(268, r.y + 13, 300, my + 10, state[nm]));
+          g.appendChild(node(300, my, 110, 20, nm, null, state[nm], "leaf"));
+        });
+      }
+    });
+  }
+
+  function node(x, y, w, h, label, sub, cls, extra) {
+    var gg = svgEl("g", { class: "gnode " + extra, transform: "translate(" + x + "," + y + ")" });
+    gg.appendChild(svgEl("rect", { width: w, height: h }));
+    gg.appendChild(svgEl("circle", { class: "gdot " + cls, cx: 10, cy: h / 2 }));
+    var t = svgEl("text", { x: 20, y: sub ? h / 2 - 1 : h / 2 + 3.5 });
+    t.textContent = label;
+    gg.appendChild(t);
+    if (sub) {
+      var s2 = svgEl("text", { class: "sub", x: 20, y: h / 2 + 9 });
+      s2.textContent = sub;
+      gg.appendChild(s2);
+    }
+    return gg;
+  }
+
+  function edge(x1, y1, x2, y2, cls) {
+    var mx = (x1 + x2) / 2;
+    return svgEl("path", { class: "gedge " + cls, d: "M" + x1 + "," + y1 + " C" + mx + "," + y1 + " " + mx + "," + y2 + " " + x2 + "," + y2 });
+  }
+
+  /**
+   * Pan and zoom. Hand-rolled: the Beacon ships no libraries, by design.
+   *
+   * ⛔ CAPTURE ONLY ONCE A DRAG IS REAL. Calling `setPointerCapture` on pointerdown routes every
+   * later event to the container, so the click never reaches the node underneath and the groups
+   * become un-openable — the pan worked and the drill silently did not. The pointer has to move
+   * past a small threshold before this takes over, and a click that followed a drag is discarded
+   * so releasing the mouse over a node does not open it by accident.
+   */
+  var graphDragged = false;
+  (function panzoom() {
+    var box = document.getElementById("viewGraph");
+    var gz = document.getElementById("gz");
+    var tx = 0, ty = 0, k = 1, down = false, px = 0, py = 0, sx = 0, sy = 0;
+    function apply() { gz.setAttribute("transform", "translate(" + tx + "," + ty + ") scale(" + k + ")"); }
+    box.addEventListener("pointerdown", function (e) {
+      down = true; graphDragged = false;
+      px = sx = e.clientX; py = sy = e.clientY;
+    });
+    box.addEventListener("pointermove", function (e) {
+      if (!down) return;
+      if (!graphDragged) {
+        if (Math.abs(e.clientX - sx) + Math.abs(e.clientY - sy) < 4) return;
+        graphDragged = true;
+        box.classList.add("dragging");
+        try { box.setPointerCapture(e.pointerId); } catch (_) {}
+      }
+      tx += e.clientX - px; ty += e.clientY - py; px = e.clientX; py = e.clientY; apply();
+    });
+    function stop(e) {
+      down = false;
+      box.classList.remove("dragging");
+      if (e && e.pointerId != null) { try { box.releasePointerCapture(e.pointerId); } catch (_) {} }
+    }
+    box.addEventListener("pointerup", stop);
+    box.addEventListener("pointercancel", stop);
+    box.addEventListener("wheel", function (e) {
+      e.preventDefault();
+      var f = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+      k = Math.min(3, Math.max(0.45, k * f));
+      apply();
+    }, { passive: false });
+  })();
+
+  /* ── The two views, and the expand toggle. ── */
+  (function views() {
+    var m = document.getElementById("segMap"), gr = document.getElementById("segGraph"),
+        wide = document.getElementById("segWide");
+    function show(which) {
+      var isMap = which === "map";
+      document.getElementById("viewMap").hidden = !isMap;
+      document.getElementById("viewGraph").hidden = isMap;
+      document.getElementById("ghint").hidden = isMap;
+      m.setAttribute("aria-pressed", isMap ? "true" : "false");
+      gr.setAttribute("aria-pressed", isMap ? "false" : "true");
+    }
+    m.addEventListener("click", function () { show("map"); });
+    gr.addEventListener("click", function () { show("graph"); });
+    wide.addEventListener("click", function () {
+      var on = !document.body.classList.contains("mapfull");
+      document.body.classList.toggle("mapfull", on);
+      wide.setAttribute("aria-pressed", on ? "true" : "false");
+      if (on) show("graph");
+    });
+  })();
 
   var busy = false;
   function run() {
