@@ -342,26 +342,46 @@
     /* A probed host that is not answering at all counts as "them" for the verdict — it is the
        strongest signal these vendors can give, even if it cannot say why. */
     var deadProbes = probes.filter(function (r) { return !r.up; });
-    var hurting = results.filter(function (r) { return r.indicator === "major" || r.indicator === "critical"; })
-      .concat(deadProbes.map(function (r) { return { v: { name: r.p.name } }; }));
+    var hurting = results.filter(function (r) { return r.indicator === "major" || r.indicator === "critical"; });
+
+    /**
+     * ⛔ THE SENTENCE HAS TO MATCH THE EVIDENCE, AND THE TWO KINDS ARE NOT THE SAME FACT. A
+     * vendor with a readable feed is REPORTING an incident — it told us so itself. A probed host
+     * is only NOT ANSWERING: the response is opaque, so there is no status code to read and no
+     * incident to quote. Calling that "a major incident" would invent knowledge this page does
+     * not have, which is the exact failure the row labels were written to avoid — it would be
+     * careless to be scrupulous in the row and loose in the headline.
+     */
+    function nameList(xs) { return xs.join(xs.length > 2 ? ", " : " and "); }
+    function themClause() {
+      var parts = [];
+      if (hurting.length) {
+        parts.push(nameList(hurting.map(function (r) { return r.v.name; })) +
+          (hurting.length > 1 ? " are" : " is") + " reporting a major incident");
+      }
+      if (deadProbes.length) {
+        parts.push(nameList(deadProbes.map(function (r) { return r.p.name; })) +
+          (deadProbes.length > 1 ? " are" : " is") + " not answering");
+      }
+      return parts.join(", and ");
+    }
+    var themCount = hurting.length + deadProbes.length;
     var minor = results.filter(function (r) { return r.indicator === "minor"; });
     var unreadable = results.filter(function (r) { return r.indicator === "unknown"; });
     var v = el("verdict"), b = el("because"), bar = el("bar");
 
-    if (!self.up && hurting.length) {
+    if (!self.up && themCount) {
       v.textContent = "Probably them.";
-      b.textContent = "Waihana isn’t answering, and " + hurting.map(function (r) { return r.v.name; }).join(" and ") +
-        (hurting.length > 1 ? " are" : " is") + " reporting a major incident. Sit tight.";
+      b.textContent = "Waihana isn’t answering, and " + themClause() + ". Sit tight.";
       bar.className = "bar bad";
     } else if (!self.up) {
       v.textContent = "Probably us.";
       b.textContent = "Waihana isn’t answering and every provider reports normal service. Check whether a deploy is rolling out — that is the usual cause, and it clears on its own in a few minutes.";
       bar.className = "bar bad";
-    } else if (hurting.length) {
+    } else if (themCount) {
       v.textContent = "Waihana is up.";
-      b.textContent = hurting.map(function (r) { return r.v.name; }).join(" and ") +
-        (hurting.length > 1 ? " are" : " is") + " having a major incident, so anything that depends on " +
-        (hurting.length > 1 ? "them" : "it") + " may fail. Everything else is fine.";
+      b.textContent = themClause() + ", so anything that depends on " +
+        (themCount > 1 ? "them" : "it") + " may fail. Everything else is fine.";
       bar.className = "bar warn";
     } else if (minor.length) {
       v.textContent = "Waihana is up.";
