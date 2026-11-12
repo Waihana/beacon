@@ -7,11 +7,8 @@
 <meta name="color-scheme" content="dark">
 <title>Waihana — us or them?</title>
 <!--
-  The Beacon — a single static page that answers one question: is waihana.com down,
-  and is it us or a provider?
-
-  No build step, no dependencies, no CDN, no webfont, no server, no database, no secrets,
-  no auth. It fetches when you open it, so it is current by construction.
+  The Beacon — is waihana.com down, and is it us or a provider?
+  One static page. No build, no dependencies, no server, no database, no secrets, no auth.
 -->
 <style>
   :root {
@@ -87,23 +84,32 @@
 (function () {
   "use strict";
 
-  /* Each sends `Access-Control-Allow-Origin: *`, which is what makes a server unnecessary. */
+  /* ⚠️ VERIFIED 2026-11-12: every one of these sends `Access-Control-Allow-Origin: *`, which is
+     what makes a server unnecessary. Anthropic's status.anthropic.com 301s to status.claude.com —
+     the final URL is used directly so the redirect cannot cost a second round trip. */
+  /* Every external service this app holds a credential for. Each endpoint returns JSON with
+     `Access-Control-Allow-Origin: *`, which is what makes a server unnecessary. */
   var VENDORS = [
-    { name: "Supabase",   note: "database, auth, storage", url: "https://status.supabase.com/api/v2/summary.json" },
-    { name: "Cloudflare", note: "DNS and edge",            url: "https://www.cloudflarestatus.com/api/v2/summary.json" },
-    { name: "Shopify",    note: "orders and checkout",     url: "https://www.shopifystatus.com/api/v2/summary.json" },
-    { name: "Twilio",     note: "calls and texts",         url: "https://status.twilio.com/api/v2/summary.json" },
-    { name: "Claude",     note: "the assistant",           url: "https://status.claude.com/api/v2/summary.json" },
-    { name: "ChatGPT",    note: "the assistant",           url: "https://status.openai.com/api/v2/summary.json" },
-    { name: "LiveKit",    note: "huddles and voice",       url: "https://status.livekit.io/api/v2/summary.json" },
-    { name: "Deepgram",   note: "transcription",           url: "https://status.deepgram.com/api/v2/summary.json" }
+    { name: "Supabase",   note: "database, auth, storage",  url: "https://status.supabase.com/api/v2/summary.json" },
+    { name: "Cloudflare", note: "DNS and edge",             url: "https://www.cloudflarestatus.com/api/v2/summary.json" },
+    { name: "Shopify",    note: "orders and checkout",      url: "https://www.shopifystatus.com/api/v2/summary.json" },
+    { name: "Twilio",     note: "calls and texts",          url: "https://status.twilio.com/api/v2/summary.json" },
+    { name: "Claude",     note: "the assistant",            url: "https://status.claude.com/api/v2/summary.json" },
+    { name: "ChatGPT",    note: "the assistant",            url: "https://status.openai.com/api/v2/summary.json" },
+    { name: "LiveKit",    note: "huddles and voice",        url: "https://status.livekit.io/api/v2/summary.json" },
+    { name: "Deepgram",   note: "transcription",            url: "https://status.deepgram.com/api/v2/summary.json" },
+    { name: "Sentry",     note: "error reporting",          url: "https://status.sentry.io/api/v2/summary.json" },
+    { name: "ElevenLabs", note: "voice synthesis",          url: "https://status.elevenlabs.io/api/v2/summary.json" },
+    { name: "Dropbox",    note: "file sync",                url: "https://status.dropbox.com/api/v2/summary.json" },
+    /* ⚠️ Google publishes an incident ARRAY, not a statuspage summary — handled by `kind`. */
+    { name: "Google",     note: "maps and sign-in",         url: "https://status.cloud.google.com/incidents.json", kind: "gcp" }
   ];
 
-  /* No browser-readable status page. Stated rather than silently omitted. */
-  var UNREADABLE = [
-    { name: "Railway", note: "hosts Reef — covered by the Waihana check above" },
-    { name: "Postmark", note: "email sending — publishes no readable status" }
-  ];
+  /* ⚠️ No browser-readable status page. Listed so their absence is a stated fact rather than a
+     silent gap — Railway is covered better by the Waihana probe below, since it hosts us. */
+  /* Credentialed services publishing nothing a browser can read. Named rather than omitted —
+     an absent row reads as "fine", and these are not known to be fine. */
+  var UNREADABLE = ["Railway", "Postmark", "Higgsfield", "Meta / Instagram", "FedEx", "DHL", "Pexels", "Pixabay", "Freesound"];
 
   var HEALTH = "https://staff.waihana.com/api/health";
   var RANK = { none: 0, minor: 1, major: 2, critical: 3 };
@@ -140,6 +146,24 @@
     return fetch(v.url, { cache: "no-store", signal: withTimeout(9000) })
       .then(function (r) { return r.json(); })
       .then(function (j) {
+        /* Google: an array of incidents; `end` absent means still open. No indicator field, so
+           severity is inferred from whether anything is open at all. */
+        if (v.kind === "gcp") {
+          var openOnes = (Array.isArray(j) ? j : []).filter(function (i) { return !i.end; });
+          return {
+            v: v,
+            indicator: openOnes.length ? "major" : "none",
+            desc: openOnes.length ? "Incident open" : "All Systems Operational",
+            incidents: openOnes.slice(0, 2).map(function (i) {
+              return {
+                name: (i.affected_products || []).map(function (p) { return p.title; }).join(", ") || "Google Cloud incident",
+                body: (i.external_desc || "").replace(/\s+/g, " ").trim(),
+                since: i.begin || null,
+                impact: "major"
+              };
+            })
+          };
+        }
         var st = (j && j.status) || {};
         /* ⛔ INCIDENTS, NOT COMPONENTS. Cloudflare alone lists ~80 non-operational components at any
            moment — individual city PoPs under maintenance. Showing those would bury the one line
@@ -207,7 +231,7 @@
           box.appendChild(d);
         }
       });
-    UNREADABLE.forEach(function (u) { box.appendChild(row(u.name, u.note, "unknown", "No public feed")); });
+    box.appendChild(row("No public status feed", UNREADABLE.join(" · "), "unknown", ""));
 
     /* A provider can report all-clear while our own deploy is the cause. */
     var hurting = results.filter(function (r) { return r.indicator === "major" || r.indicator === "critical"; });
