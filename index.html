@@ -248,7 +248,7 @@
         <g id="gz"></g>
       </svg>
     </div>
-    <p class="ghint" id="ghint" hidden>Drag to pan, scroll to zoom, tap a group to open it.</p>
+    <p class="ghint" id="ghint" hidden>Drag to pan, pinch or scroll to zoom, double-tap to reset. Tap a group to open it.</p>
    </aside>
   </div>
 
@@ -877,36 +877,134 @@
   var graphDragged = false;
   (function panzoom() {
     var box = document.getElementById("viewGraph");
+    var svg = document.getElementById("gsvg");
     var gz = document.getElementById("gz");
-    var tx = 0, ty = 0, k = 1, down = false, px = 0, py = 0, sx = 0, sy = 0;
+    var tx = 0, ty = 0, k = 1;
+
+    /* Every pointer currently down, by id — the thing the old version did not track. */
+    var pts = new Map();
+    var last = null;   /* {x, y, d} in USER units: midpoint and spread of the active gesture. */
+
     function apply() { gz.setAttribute("transform", "translate(" + tx + "," + ty + ") scale(" + k + ")"); }
+
+    /**
+     * ⛔ CLIENT PIXELS ARE NOT USER UNITS, and treating them as if they were is why dragging felt
+     * wrong with a mouse. The svg is `viewBox="0 0 420 …"` drawn into a box that is 100% wide and
+     * a fixed height, so one CSS pixel is some other number of user units — and the ratio changes
+     * with the window and with `body.mapfull`. Translating by a raw `clientX` delta therefore moved
+     * the graph faster or slower than the cursor. `getScreenCTM()` is the live answer, read per
+     * event rather than cached, because a resize or the expand toggle changes it.
+     */
+    function toUser(cx, cy) {
+      var m = svg.getScreenCTM();
+      if (!m) return { x: cx, y: cy };
+      var r = svg.getBoundingClientRect();
+      return { x: (cx - r.left) / m.a, y: (cy - r.top) / m.d };
+    }
+
+    /** Midpoint and spread of the live pointers, in user units. */
+    function gesture() {
+      var xs = 0, ys = 0, n = 0, a = null, b = null;
+      pts.forEach(function (p) {
+        var u = toUser(p.x, p.y);
+        xs += u.x; ys += u.y; n++;
+        if (!a) a = u; else if (!b) b = u;
+      });
+      var d = a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0;
+      return { x: xs / n, y: ys / n, d: d, n: n };
+    }
+
+    /**
+     * ⛔ ZOOM ANCHORED ON THE POINTER — the other half of "feels weird with a mouse". The old wheel
+     * handler changed `k` and nothing else, so the graph scaled about the group's own origin and
+     * slid out from under the cursor. Keeping the point you are pointing at fixed is the whole
+     * expectation of a zoom; the arithmetic is "where was this user-point in group space, and what
+     * translate keeps it there at the new scale".
+     */
+    function zoomAt(ux, uy, factor) {
+      var k2 = Math.min(3, Math.max(0.45, k * factor));
+      if (k2 === k) return;
+      tx = ux - (ux - tx) * (k2 / k);
+      ty = uy - (uy - ty) * (k2 / k);
+      k = k2;
+      apply();
+    }
+
     box.addEventListener("pointerdown", function (e) {
-      down = true; graphDragged = false;
-      px = sx = e.clientX; py = sy = e.clientY;
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      graphDragged = false;
+      last = gesture();
+      /* A second finger starts a pinch, which is always a real gesture — never a tap on a node. */
+      if (pts.size > 1) graphDragged = true;
     });
+
     box.addEventListener("pointermove", function (e) {
-      if (!down) return;
+      if (!pts.has(e.pointerId)) return;
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      var g = gesture();
+
+      /**
+       * ⛔ CAPTURE ONLY ONCE A DRAG IS REAL — kept from the original, and the reason is still live.
+       * Calling `setPointerCapture` on pointerdown routes every later event to the container, so the
+       * click never reaches the node underneath and the groups become un-openable: the pan worked
+       * and the drill silently did not. The threshold is measured in USER units now so it means the
+       * same thing at every zoom level and on every screen width.
+       */
       if (!graphDragged) {
-        if (Math.abs(e.clientX - sx) + Math.abs(e.clientY - sy) < 4) return;
+        if (Math.abs(g.x - last.x) + Math.abs(g.y - last.y) < 3) return;
         graphDragged = true;
         box.classList.add("dragging");
         try { box.setPointerCapture(e.pointerId); } catch (_) {}
       }
-      tx += e.clientX - px; ty += e.clientY - py; px = e.clientX; py = e.clientY; apply();
+
+      /* Pan by the midpoint: one finger or two, the content follows what the hand is doing. */
+      tx += g.x - last.x;
+      ty += g.y - last.y;
+
+      /* ⛔ PINCH. Two pointers: the ratio of their spread IS the zoom, anchored at the midpoint. */
+      if (g.n > 1 && last.d > 0 && g.d > 0) {
+        var k2 = Math.min(3, Math.max(0.45, k * (g.d / last.d)));
+        if (k2 !== k) {
+          tx = g.x - (g.x - tx) * (k2 / k);
+          ty = g.y - (g.y - ty) * (k2 / k);
+          k = k2;
+        }
+      }
+
+      last = g;
+      apply();
     });
+
     function stop(e) {
-      down = false;
-      box.classList.remove("dragging");
-      if (e && e.pointerId != null) { try { box.releasePointerCapture(e.pointerId); } catch (_) {} }
+      if (e && e.pointerId != null) {
+        pts.delete(e.pointerId);
+        try { box.releasePointerCapture(e.pointerId); } catch (_) {}
+      } else {
+        pts.clear();
+      }
+      /* ⚠️ Lifting ONE finger of a pinch must re-seat the gesture, or the remaining finger jumps
+         the graph by the distance to the old midpoint. */
+      last = pts.size ? gesture() : null;
+      if (!pts.size) box.classList.remove("dragging");
     }
     box.addEventListener("pointerup", stop);
     box.addEventListener("pointercancel", stop);
+    box.addEventListener("lostpointercapture", function (e) { pts.delete(e.pointerId); last = pts.size ? gesture() : null; });
+
     box.addEventListener("wheel", function (e) {
       e.preventDefault();
-      var f = e.deltaY < 0 ? 1.12 : 1 / 1.12;
-      k = Math.min(3, Math.max(0.45, k * f));
-      apply();
+      var u = toUser(e.clientX, e.clientY);
+      /* ⚠️ Trackpads report small continuous deltas; a fixed 1.12 step makes them feel like a
+         ratchet. Scaling by the delta keeps a two-finger swipe smooth without racing a mouse wheel. */
+      var step = Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.002));
+      zoomAt(u.x, u.y, Math.min(1.5, Math.max(1 / 1.5, step)));
     }, { passive: false });
+
+    /* ⚠️ A pan with no way back strands the graph off-screen. Double-click or double-tap resets. */
+    box.addEventListener("dblclick", function (e) {
+      e.preventDefault();
+      tx = 0; ty = 0; k = 1; apply();
+    });
   })();
 
   /* ── The two views, and the expand toggle. ── */
